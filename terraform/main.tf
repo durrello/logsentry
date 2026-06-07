@@ -115,14 +115,14 @@ resource "aws_lambda_event_source_mapping" "kinesis_trigger" {
   starting_position = "LATEST"
   batch_size        = 100
 
-  maximum_retry_attempts       = 3
+  maximum_retry_attempts         = 3
   bisect_batch_on_function_error = true
 }
 
 # ─── Dead Letter Queue ───────────────────────────────────────────────────────
 resource "aws_sqs_queue" "dlq" {
   name                      = "logsentry-dlq-${var.environment}"
-  message_retention_seconds = 1209600  # 14 days
+  message_retention_seconds = 1209600 # 14 days
 }
 
 # ─── ECR Repository ─────────────────────────────────────────────────────────
@@ -143,8 +143,8 @@ resource "aws_iam_role" "lambda_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "lambda.amazonaws.com" }
     }]
   })
@@ -213,8 +213,8 @@ resource "aws_iam_role" "cloudwatch_to_kinesis" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
       Principal = { Service = "logs.amazonaws.com" }
     }]
   })

@@ -39,7 +39,7 @@ class TestPatternDetection:
         assert any(f["pattern_name"] == "jwt_token" for f in findings)
 
     def test_detect_stripe_key(self):
-        log_event = {"message": "Payment processed with sk_live_EXAMPLE_KEY_REDACTED_000", "timestamp": 1700000000000}
+        log_event = {"message": "Payment processed with pk_test_FAKE00000000000000000000", "timestamp": 1700000000000}
         findings = scan_log_event(log_event, "/app/payments", "stream-1")
         assert len(findings) >= 1
         assert any(f["pattern_name"] == "stripe_key" for f in findings)
@@ -101,9 +101,9 @@ class TestUtilityFunctions:
         assert entropy < 1.0
 
     def test_mask_secret_long(self):
-        masked = mask_secret("sk_live_EXAMPLE_KEY_REDACTED_000")
-        assert masked.startswith("sk_l")
-        assert masked.endswith("7dc")
+        masked = mask_secret("pk_test_FAKE00000000000000000000")
+        assert masked.startswith("pk_t")
+        assert masked.endswith("0000")
         assert "****" in masked or "*" in masked
 
     def test_mask_secret_short(self):

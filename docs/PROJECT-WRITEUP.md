@@ -79,7 +79,7 @@ In real-world production environments, teams run dozens of microservices that ge
 
 1. **Developer pushes code** that accidentally logs an API key in debug output
 2. **Service generates logs** → CloudWatch → Kinesis → Lambda scanner
-3. **Scanner detects** the pattern `sk_live_EXAMPLE_KEY_REDACTED_000` in the log line
+3. **Scanner detects** the pattern `pk_test_FAKE00000000000000000000` in the log line
 4. **Alert fires** → Slack message: "⚠️ API key detected in logs from payment-service (us-east-1)"
 5. **DevOps engineer** opens the dashboard, sees the finding, clicks "Rotate" to regenerate the Stripe key
 6. **Engineer fixes** the application code to stop logging the value

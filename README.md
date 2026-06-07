@@ -75,7 +75,7 @@ Services → CloudWatch → Kinesis Stream → Lambda Scanner → DynamoDB (find
 | Password in logs | `password=MySecret123` | Critical |
 | Database URL | `postgres://user:pass@host/db` | Critical |
 | Private Key | `-----BEGIN RSA PRIVATE KEY-----` | Critical |
-| Stripe Key | `sk_live_EXAMPLE_KEY_REDACTED_000` | Critical |
+| Stripe Key | `pk_test_FAKE00000000000000000000` | Critical |
 | GitHub Token | `ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZab` | Critical |
 | JWT Token | `eyJhbGciOiJIUzI1NiIs...` | High |
 | Bearer Token | `Bearer eyJhbGci...` | High |

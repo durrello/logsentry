@@ -1,0 +1,97 @@
+name: Infrastructure Pipeline
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "terraform/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "terraform/**"
+
+env:
+  TF_VERSION: "1.5.7"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: terraform init
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan Dev
+        if: github.ref == 'refs/heads/dev'
+        run: terraform plan -var-file=terraform.tfvars.dev
+      - name: Plan Prod
+        if: github.ref == 'refs/heads/main'
+        run: terraform plan -var-file=terraform.tfvars.prod
+
+  terraform-security:
+    name: Terraform Security Scan
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ./terraform
+          soft_fail: true
+
+  terraform-apply-dev:
+    name: Apply (Dev)
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, terraform-security]
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    environment: infrastructure-dev
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: terraform init
+      - run: terraform apply -var-file=terraform.tfvars.dev -auto-approve
+
+  terraform-apply-prod:
+    name: Apply (Prod)
+    runs-on: ubuntu-latest
+    needs: [terraform-plan, terraform-security]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: infrastructure-prod
+    defaults:
+      run:
+        working-directory: ./terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: terraform init
+      - run: terraform apply -var-file=terraform.tfvars.prod -auto-approve

@@ -1,0 +1,123 @@
+stages:
+  - test
+  - security
+  - build
+  - deploy
+  - infra-plan
+  - infra-apply
+
+variables:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: logsentry-scanner-dev
+
+# === APP PIPELINE ===
+unit-tests:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - cd scanner
+    - pip install -r requirements.txt pytest pytest-cov
+    - pytest tests/ -v --tb=short
+  rules:
+    - changes:
+        - scanner/**
+
+trivy-scan:
+  stage: security
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy fs --severity CRITICAL,HIGH --exit-code 0 ./scanner
+  rules:
+    - changes:
+        - scanner/**
+  needs: [unit-tests]
+
+build-push-ecr:
+  stage: build
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  before_script:
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+  script:
+    - docker build -t $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./scanner
+    - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA
+    - docker tag $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+    - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - scanner/**
+  needs: [trivy-scan]
+
+update-lambda:
+  stage: deploy
+  image:
+    name: amazon/aws-cli:latest
+    entrypoint: [""]
+  script:
+    - aws lambda update-function-code --function-name logsentry-scanner-dev --image-uri $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - scanner/**
+  needs: [build-push-ecr]
+  environment:
+    name: development
+
+# === INFRA PIPELINE ===
+terraform-validate:
+  stage: test
+  image:
+    name: hashicorp/terraform:1.5.7
+    entrypoint: [""]
+  script:
+    - cd terraform && terraform init -backend=false && terraform fmt -check && terraform validate
+  rules:
+    - changes:
+        - terraform/**
+
+terraform-security:
+  stage: security
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
+  script:
+    - tfsec ./terraform --soft-fail
+  rules:
+    - changes:
+        - terraform/**
+  needs: [terraform-validate]
+  allow_failure: true
+
+terraform-plan:
+  stage: infra-plan
+  image:
+    name: hashicorp/terraform:1.5.7
+    entrypoint: [""]
+  script:
+    - cd terraform && terraform init && terraform plan -var-file=terraform.tfvars.dev
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - terraform/**
+  needs: [terraform-security]
+
+terraform-apply:
+  stage: infra-apply
+  image:
+    name: hashicorp/terraform:1.5.7
+    entrypoint: [""]
+  script:
+    - cd terraform && terraform init && terraform apply -var-file=terraform.tfvars.dev -auto-approve
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - terraform/**
+  needs: [terraform-plan]
+  when: manual
+  environment:
+    name: infrastructure-dev

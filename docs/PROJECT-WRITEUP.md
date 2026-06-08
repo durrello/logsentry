@@ -1,76 +1,68 @@
 # LogSentry — Sensitive Data Detection in Application Logs
 
-## Project Idea
+## Project Overview
 
-In real-world production environments, teams run dozens of microservices that generate millions of log lines daily. Developers accidentally log sensitive data — API keys, passwords, tokens, database credentials, PII — creating serious security and compliance risks.
+In production environments, services generate millions of log lines daily. Developers accidentally log sensitive data — API keys, passwords, tokens, database credentials — creating serious security and compliance risks.
 
-**LogSentry** is a log-scanning pipeline that:
-1. **Ingests logs** from multiple services (via CloudWatch, Fluentd, or direct stream)
-2. **Scans in real-time** for sensitive patterns (API keys, passwords, JWTs, AWS credentials, etc.)
-3. **Sends alerts** (Slack, email, PagerDuty) when secrets are detected
-4. **Provides a dashboard** to view, acknowledge, and remediate findings
-5. **Offers remediation actions** — mask the secret in logs, rotate/regenerate the credential, or suppress the log source
+**LogSentry** is an event-driven, serverless pipeline that:
+1. **Auto-subscribes** all CloudWatch log groups (zero manual config)
+2. **Scans in real-time** for 12 sensitive patterns with entropy analysis
+3. **Stores findings** in DynamoDB with deduplication and TTL
+4. **Sends rate-limited alerts** via SNS (email, Slack, PagerDuty)
+5. **Emits custom metrics** for monitoring and CloudWatch alarms
+6. **Provides a dashboard** to view, filter, and resolve findings
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        APPLICATION SERVICES                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐               │
-│  │ Service A│  │ Service B│  │ Service C│  │ Service N│               │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘               │
-│       │              │              │              │                     │
-└───────┼──────────────┼──────────────┼──────────────┼────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        APPLICATION SERVICES                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
+│  │ Service A│  │ Service B│  │ Service C│  │ Service N│              │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘              │
+└───────┼──────────────┼──────────────┼──────────────┼───────────────────┘
         │              │              │              │
         ▼              ▼              ▼              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     AWS CLOUDWATCH LOG GROUPS                            │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │ CloudWatch Subscription Filter
+┌────────────────────────────────────────────────────────────────────────┐
+│                     AWS CLOUDWATCH LOG GROUPS                           │
+│              (Auto-subscribed via EventBridge + Lambda)                 │
+└────────────────────────────────┬───────────────────────────────────────┘
+                                 │ Subscription Filter (auto-created)
                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        KINESIS DATA STREAM                               │
-│                    (real-time log ingestion)                             │
-└────────────────────────────────┬────────────────────────────────────────┘
-                                 │
+┌────────────────────────────────────────────────────────────────────────┐
+│                        KINESIS DATA STREAM                              │
+│                 (real-time buffer, 24h retention)                       │
+└────────────────────────────────┬───────────────────────────────────────┘
+                                 │ Event Source Mapping (batch=100)
                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      LAMBDA: LOG SCANNER                                 │
-│  ┌──────────────────────────────────────────────────────────────┐       │
-│  │  Pattern Engine:                                              │       │
-│  │  • AWS Access Keys (AKIA...)                                  │       │
-│  │  • API Keys / Tokens (Bearer, sk_live_, etc.)                 │       │
-│  │  • Passwords in key=value or JSON                             │       │
-│  │  • JWTs (eyJ...)                                              │       │
-│  │  • Database connection strings                                │       │
-│  │  • PII (emails, SSNs, credit cards)                           │       │
-│  └──────────────────────────────────────────────────────────────┘       │
-│                         │                                               │
-│              ┌──────────┴──────────┐                                    │
-│              ▼                     ▼                                     │
-│    ┌─────────────────┐   ┌─────────────────┐                           │
-│    │  DynamoDB:       │   │  SNS Topic:     │                           │
-│    │  Store finding   │   │  Send alert     │                           │
-│    └─────────────────┘   └────────┬────────┘                           │
-│                                    │                                    │
-└────────────────────────────────────┼────────────────────────────────────┘
-                                     │
-                      ┌──────────────┼──────────────┐
-                      ▼              ▼              ▼
-              ┌─────────────┐ ┌──────────┐ ┌──────────────┐
-              │    Slack    │ │  Email   │ │  PagerDuty   │
-              └─────────────┘ └──────────┘ └──────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      API GATEWAY + LAMBDA: DASHBOARD API                 │
-│  GET  /findings          — list all findings                            │
-│  GET  /findings/:id      — detail view                                  │
-│  POST /findings/:id/ack  — acknowledge                                  │
-│  POST /findings/:id/mask — mask secret in logs                          │
-│  POST /findings/:id/rotate — trigger credential rotation                │
-└─────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                      LAMBDA: LOG SCANNER (zip deploy)                   │
+│  ┌──────────────────────────────────────────────────────────────┐     │
+│  │  12 Detection Patterns + Shannon Entropy Analysis:            │     │
+│  │  • AWS Keys, Stripe Keys, GitHub Tokens, Slack Tokens        │     │
+│  │  • Passwords, DB URLs, Private Keys, JWTs, Bearer Tokens     │     │
+│  │  • Generic API Keys, Generic Secrets                          │     │
+│  └──────────────────────────────────────────────────────────────┘     │
+│              │                    │                  │                  │
+│              ▼                    ▼                  ▼                  │
+│   ┌──────────────────┐  ┌───────────────┐  ┌──────────────────┐      │
+│   │   DynamoDB        │  │  SNS Topic    │  │  CloudWatch      │      │
+│   │   (TTL + GSI)     │  │  (rate-limit) │  │  (custom metrics)│      │
+│   └──────────────────┘  └───────┬───────┘  └──────────────────┘      │
+│                                  │                                     │
+│   ┌──────────────────┐          │          ┌──────────────────┐       │
+│   │   SQS DLQ         │          │         │  CW Alarms        │      │
+│   │   (14-day retain) │          │         │  (errors+critical)│      │
+│   └──────────────────┘          │          └──────────────────┘       │
+└──────────────────────────────────┼─────────────────────────────────────┘
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+             ┌────────────┐ ┌────────────┐ ┌────────────┐
+             │   Slack    │ │   Email    │ │ PagerDuty  │
+             └────────────┘ └────────────┘ └────────────┘
 ```
 
 ---
@@ -78,12 +70,13 @@ In real-world production environments, teams run dozens of microservices that ge
 ## Day-to-Day Use Case
 
 1. **Developer pushes code** that accidentally logs an API key in debug output
-2. **Service generates logs** → CloudWatch → Kinesis → Lambda scanner
-3. **Scanner detects** the pattern `pk_test_FAKE00000000000000000000` in the log line
-4. **Alert fires** → Slack message: "⚠️ API key detected in logs from payment-service (us-east-1)"
-5. **DevOps engineer** opens the dashboard, sees the finding, clicks "Rotate" to regenerate the Stripe key
-6. **Engineer fixes** the application code to stop logging the value
-7. **Finding marked resolved** — audit trail preserved
+2. **Service generates logs** → CloudWatch → Kinesis → Lambda scanner (all automatic)
+3. **Scanner detects** `sk_live_51HqS9RJ7sK4x8Yd...` in the log line
+4. **Custom metric emitted** → CloudWatch alarm fires
+5. **Rate-limited alert** → Email/Slack: "🚨 Stripe API key detected in payment-service"
+6. **Engineer opens dashboard** → sees finding → clicks "Resolve"
+7. **Engineer fixes** the code, rotates the credential
+8. **Finding auto-expires** from DynamoDB after 90 days (TTL)
 
 ---
 
@@ -91,18 +84,31 @@ In real-world production environments, teams run dozens of microservices that ge
 
 | Layer | Technology |
 |---|---|
-| Log Ingestion | AWS CloudWatch + Kinesis Data Stream |
-| Detection Engine | AWS Lambda (Python) with regex + entropy analysis |
-| Storage | DynamoDB (findings), S3 (raw log samples) |
-| Notifications | SNS → Slack/Email/PagerDuty |
-| Dashboard API | API Gateway + Lambda |
-| Dashboard UI | React (Next.js) |
-| IaC | Terraform |
-| CI/CD | GitHub Actions + GitLab CI |
-| Container | Docker (for local dev + dashboard) |
-| Orchestration | EKS (dashboard + sample services) |
-| Monitoring | Prometheus + Grafana |
-| Security | IAM least-privilege, encrypted DynamoDB, Trivy scanning |
+| Detection Engine | Python 3.11 (Lambda) — regex + Shannon entropy |
+| Log Ingestion | CloudWatch Subscription Filters → Kinesis |
+| Auto-Subscribe | EventBridge (CloudTrail) + Scheduled Lambda (5-min fallback) |
+| Storage | DynamoDB (findings, GSI on severity, TTL for auto-expiry) |
+| Notifications | SNS → Email / Slack / PagerDuty (rate-limited) |
+| Dead Letter Queue | SQS (14-day retention for failed events) |
+| Monitoring | CloudWatch custom metrics (LogSentry namespace) + alarms |
+| Dashboard | Flask + vanilla JS (demo mode + live DynamoDB mode) |
+| IaC | Terraform (all resources, including state backend) |
+| CI/CD | GitHub Actions + GitLab CI (test → scan → deploy zip) |
+| Security | Trivy scanning, tfsec, IAM least-privilege, encrypted DynamoDB |
+
+---
+
+## Design Decisions
+
+| Decision | Rationale |
+|---|---|
+| Zip deploy (not Docker/ECR) | Only dependency is boto3 (in Lambda runtime). Zip = faster cold start, simpler CI, smaller artifact |
+| Kinesis (not SQS) | Ordered processing, replay capability, fan-out to multiple consumers |
+| DynamoDB (not RDS) | Serverless, auto-scaling, pay-per-request, built-in TTL |
+| Lazy boto3 initialization | Tests can import handler without AWS credentials |
+| EventBridge + scheduled scan | Works with or without CloudTrail enabled |
+| Rate-limited alerts | Prevents notification storms when a service dumps thousands of secrets |
+| Deterministic finding IDs | Deduplication — same secret in same log group = same finding |
 
 ---
 
@@ -110,23 +116,59 @@ In real-world production environments, teams run dozens of microservices that ge
 
 | # | Requirement | Implementation |
 |---|---|---|
-| 1 | Docker | Multi-stage Dockerfile for dashboard + scanner local dev |
-| 2 | Dev & Prod | Separate AWS accounts/environments via Terraform workspaces |
-| 3 | Tests | Unit tests (pattern detection), integration tests (Lambda), E2E (full pipeline) |
-| 4 | Kubernetes | Dashboard deployed on EKS, sample log-generating services on EKS |
-| 5 | CI/CD | GitHub Actions: test → scan → build → push → deploy (app + infra) |
-| 6 | IaC | Terraform: Kinesis, Lambda, DynamoDB, SNS, API Gateway, EKS, VPC |
-| 7 | Monitoring | Prometheus metrics on detection rate, false positives, latency |
-| 8 | Security | Trivy, no hardcoded secrets, IAM roles, encrypted storage |
-| 9 | DR | DynamoDB point-in-time recovery, Lambda versioning, Terraform state in S3 |
-| 10 | Docs | This document + README + architecture diagram |
+| 1 | Containerization | Lambda zip deploy (no Docker needed — simpler, faster) |
+| 2 | Dev & Prod | Separate environments via Terraform variables (`terraform.tfvars.dev/prod`) |
+| 3 | Tests | 20 unit tests covering detection, entropy, masking, structure |
+| 4 | Orchestration | Event-driven (Kinesis → Lambda), auto-subscribe (EventBridge) |
+| 5 | CI/CD | GitHub Actions: test → trivy → deploy. GitLab CI mirror available |
+| 6 | IaC | Terraform: Kinesis, Lambda, DynamoDB, SNS, SQS, IAM, CloudWatch, EventBridge |
+| 7 | Monitoring | Custom CloudWatch metrics (findings/severity), alarms, dashboard |
+| 8 | Security | Trivy, tfsec, IAM roles, encrypted storage, no hardcoded secrets |
+| 9 | DR | PITR (DynamoDB), S3 versioning (state), DLQ (failed events), 24h Kinesis retention |
+| 10 | Docs | README, SETUP.md, PROJECT-WRITEUP.md |
 
 ---
 
 ## What Makes This Project Stand Out
 
 - **Solves a real security problem** — secret leakage in logs is a top OWASP concern
-- **Event-driven serverless** — demonstrates Lambda, Kinesis, SNS (not just static web apps)
-- **Full observability pipeline** — ingestion → detection → notification → remediation
-- **Production-grade patterns** — DLQ, retries, idempotency, at-least-once processing
-- **Multi-team relevance** — useful for Security, DevOps, SRE, and Development teams
+- **Event-driven serverless** — Lambda, Kinesis, EventBridge, SNS (not just static web apps)
+- **Zero-config monitoring** — auto-subscribes all log groups, no manual setup per service
+- **Production-grade patterns** — DLQ, retries, idempotency, rate limiting, TTL, deduplication
+- **Full observability** — custom metrics, alarms, dashboard with filtering and resolution
+- **Simple deployment** — no Docker, no Kubernetes, just `terraform apply` and done
+- **Cost-effective** — all serverless, pay only for what you use
+
+---
+
+## Metrics & Observability
+
+| Metric | Namespace | Purpose |
+|---|---|---|
+| `FindingsDetected` | LogSentry | Total findings per invocation |
+| `FindingsDetected` (by severity) | LogSentry | Critical/High/Medium breakdown |
+| `NewFindings` | LogSentry | Deduplicated new findings |
+| Lambda `Errors` | AWS/Lambda | Scanner failure rate |
+| Lambda `Duration` | AWS/Lambda | Processing time |
+| Lambda `Invocations` | AWS/Lambda | Event throughput |
+
+---
+
+## Security Controls
+
+1. **IAM least-privilege** — each Lambda has only the permissions it needs
+2. **Encrypted at rest** — DynamoDB server-side encryption
+3. **No secrets in code** — all config via environment variables set by Terraform
+4. **Secret masking** — findings store only masked values (first 4 + last 4 chars)
+5. **DLQ for audit** — failed events preserved for 14 days
+6. **Trivy + tfsec** — dependency and IaC scanning in CI
+7. **Rate-limited alerts** — prevents information leakage via alert flooding
+
+---
+
+## Author
+
+**Durrell Gemuh** — DevOps & Cloud Infrastructure Engineer
+
+- Website: https://durrellgemuh.com
+- GitHub: [@durrello](https://github.com/durrello)

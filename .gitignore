@@ -6,7 +6,8 @@ venv/
 .env
 terraform/.terraform/
 terraform/*.tfstate*
-terraform/tfplan-*
+terraform/tfplan*
 terraform/.terraform.lock.hcl
+terraform/auto_subscribe.zip
 .DS_Store
 node_modules/

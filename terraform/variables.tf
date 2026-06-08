@@ -19,3 +19,9 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+variable "log_group_exclude_prefixes" {
+  description = "Comma-separated prefixes of log groups to exclude from scanning (e.g. /aws/lambda/logsentry,/aws/rds)"
+  type        = string
+  default     = "/aws/lambda/logsentry,/aws/cloudtrail,/aws/rds"
+}

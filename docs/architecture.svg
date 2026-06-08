@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 720" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f1117"/>
+      <stop offset="100%" stop-color="#161922"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#6366f1"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="720" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="480" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#e4e7ec">🛡️ LogSentry</text>
+  <text x="480" y="68" text-anchor="middle" font-size="13" fill="#9ca3af">Real-time Sensitive Data Detection in Application Logs</text>
+
+  <!-- ============ Layer 1: Services ============ -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="100" width="840" height="62" rx="10" fill="#21242f" stroke="#2d3140"/>
+  </g>
+  <text x="80" y="124" font-size="11" fill="#6b7280" font-weight="600" letter-spacing="0.05em">APPLICATION SERVICES</text>
+  <g font-size="12" fill="#cbd2dc" text-anchor="middle">
+    <rect x="92"  y="132" width="130" height="22" rx="5" fill="#2a2d3a"/><text x="157" y="147">Service A</text>
+    <rect x="246" y="132" width="130" height="22" rx="5" fill="#2a2d3a"/><text x="311" y="147">Service B</text>
+    <rect x="400" y="132" width="130" height="22" rx="5" fill="#2a2d3a"/><text x="465" y="147">Service C</text>
+    <rect x="554" y="132" width="130" height="22" rx="5" fill="#2a2d3a"/><text x="619" y="147">Service …</text>
+    <rect x="708" y="132" width="160" height="22" rx="5" fill="#2a2d3a"/><text x="788" y="147">Service N</text>
+  </g>
+
+  <!-- arrow 1 -->
+  <line x1="480" y1="162" x2="480" y2="188" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ============ Layer 2: CloudWatch ============ -->
+  <g filter="url(#shadow)">
+    <rect x="160" y="192" width="640" height="58" rx="10" fill="#21242f" stroke="#2d3140"/>
+  </g>
+  <text x="480" y="216" text-anchor="middle" font-size="14" font-weight="600" fill="#e4e7ec">AWS CloudWatch Log Groups</text>
+  <text x="480" y="236" text-anchor="middle" font-size="11" fill="#10b981">⚡ Auto-subscribed via EventBridge + Scheduled Lambda</text>
+
+  <!-- arrow 2 -->
+  <line x1="480" y1="250" x2="480" y2="276" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ============ Layer 3: Kinesis ============ -->
+  <g filter="url(#shadow)">
+    <rect x="280" y="280" width="400" height="50" rx="10" fill="#1a2332" stroke="#3b82f6"/>
+  </g>
+  <text x="480" y="300" text-anchor="middle" font-size="14" font-weight="600" fill="#60a5fa">Kinesis Data Stream</text>
+  <text x="480" y="318" text-anchor="middle" font-size="10" fill="#9ca3af">real-time buffer · 24h retention · batch=100</text>
+
+  <!-- arrow 3 -->
+  <line x1="480" y1="330" x2="480" y2="356" stroke="#6366f1" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ============ Layer 4: Lambda Scanner ============ -->
+  <g filter="url(#shadow)">
+    <rect x="180" y="360" width="600" height="120" rx="10" fill="#241f33" stroke="url(#accent)"/>
+  </g>
+  <text x="480" y="383" text-anchor="middle" font-size="14" font-weight="600" fill="#a78bfa">⚙️ Lambda: Log Scanner (zip deploy)</text>
+  <rect x="200" y="394" width="560" height="50" rx="6" fill="#1b1726"/>
+  <text x="480" y="412" text-anchor="middle" font-size="10" fill="#cbd2dc">12 patterns: AWS keys · Stripe · GitHub · Slack · JWT · passwords</text>
+  <text x="480" y="428" text-anchor="middle" font-size="10" fill="#cbd2dc">DB URLs · private keys · bearer tokens · API keys · secrets</text>
+  <text x="480" y="442" text-anchor="middle" font-size="9" fill="#6b7280">+ Shannon entropy analysis · deduplication · rate-limited alerts</text>
+  <text x="480" y="468" text-anchor="middle" font-size="9" fill="#9ca3af">↓ outputs ↓</text>
+
+  <!-- fan out arrows -->
+  <line x1="300" y1="480" x2="220" y2="516" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="420" y1="480" x2="400" y2="516" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="560" y1="480" x2="580" y2="516" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="680" y1="480" x2="760" y2="516" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ============ Layer 5: Outputs ============ -->
+  <!-- DynamoDB -->
+  <g filter="url(#shadow)"><rect x="80" y="520" width="180" height="60" rx="9" fill="#21242f" stroke="#2d3140"/></g>
+  <text x="170" y="544" text-anchor="middle" font-size="12" font-weight="600" fill="#e4e7ec">DynamoDB</text>
+  <text x="170" y="562" text-anchor="middle" font-size="9" fill="#9ca3af">findings · GSI · TTL</text>
+
+  <!-- SNS -->
+  <g filter="url(#shadow)"><rect x="290" y="520" width="180" height="60" rx="9" fill="#21242f" stroke="#2d3140"/></g>
+  <text x="380" y="544" text-anchor="middle" font-size="12" font-weight="600" fill="#e4e7ec">SNS Topic</text>
+  <text x="380" y="562" text-anchor="middle" font-size="9" fill="#9ca3af">alerts · rate-limited</text>
+
+  <!-- CloudWatch metrics -->
+  <g filter="url(#shadow)"><rect x="500" y="520" width="180" height="60" rx="9" fill="#21242f" stroke="#2d3140"/></g>
+  <text x="590" y="544" text-anchor="middle" font-size="12" font-weight="600" fill="#e4e7ec">CloudWatch</text>
+  <text x="590" y="562" text-anchor="middle" font-size="9" fill="#9ca3af">metrics + alarms</text>
+
+  <!-- SQS DLQ -->
+  <g filter="url(#shadow)"><rect x="710" y="520" width="170" height="60" rx="9" fill="#21242f" stroke="#2d3140"/></g>
+  <text x="795" y="544" text-anchor="middle" font-size="12" font-weight="600" fill="#e4e7ec">SQS DLQ</text>
+  <text x="795" y="562" text-anchor="middle" font-size="9" fill="#9ca3af">failed events · 14d</text>
+
+  <!-- arrow SNS to notifications -->
+  <line x1="380" y1="580" x2="380" y2="606" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ============ Layer 6: Notifications ============ -->
+  <g font-size="11" fill="#cbd2dc" text-anchor="middle">
+    <g filter="url(#shadow)"><rect x="200" y="610" width="110" height="34" rx="6" fill="#2a2d3a"/></g>
+    <text x="255" y="632">💬 Slack</text>
+    <g filter="url(#shadow)"><rect x="325" y="610" width="110" height="34" rx="6" fill="#2a2d3a"/></g>
+    <text x="380" y="632">✉️ Email</text>
+    <g filter="url(#shadow)"><rect x="450" y="610" width="110" height="34" rx="6" fill="#2a2d3a"/></g>
+    <text x="505" y="632">📟 PagerDuty</text>
+  </g>
+
+  <!-- Dashboard callout -->
+  <g filter="url(#shadow)"><rect x="710" y="606" width="170" height="42" rx="8" fill="#1a2e1f" stroke="#10b981"/></g>
+  <text x="795" y="624" text-anchor="middle" font-size="11" font-weight="600" fill="#34d399">📊 Dashboard</text>
+  <text x="795" y="639" text-anchor="middle" font-size="9" fill="#9ca3af">Flask · live + demo</text>
+  <line x1="795" y1="580" x2="795" y2="606" stroke="#10b981" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow)"/>
+
+  <!-- footer -->
+  <text x="480" y="694" text-anchor="middle" font-size="10" fill="#4b5563">Terraform IaC · GitHub Actions CI/CD · Python 3.11 Lambda (zip) · all serverless</text>
+</svg>

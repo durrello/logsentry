@@ -12,56 +12,10 @@ Services generate millions of log lines daily. Developers accidentally log passw
 
 ## Architecture
 
-```
-Services → CloudWatch → [Auto-Subscribe] → Kinesis → Lambda Scanner → DynamoDB + SNS Alert
-```
+![LogSentry Architecture](docs/architecture.png)
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│                     APPLICATION SERVICES                            │
-│  Service A  │  Service B  │  Service C  │  ...  │  Service N      │
-└──────┬──────┴──────┬──────┴──────┬──────┴───────┴──────┬──────────┘
-       │             │             │                      │
-       ▼             ▼             ▼                      ▼
-┌────────────────────────────────────────────────────────────────────┐
-│               AWS CLOUDWATCH LOG GROUPS                             │
-│         (Auto-subscribed by EventBridge + Lambda)                   │
-└──────────────────────────────┬─────────────────────────────────────┘
-                               ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                    KINESIS DATA STREAM                              │
-│               (real-time log event buffer)                          │
-└──────────────────────────────┬─────────────────────────────────────┘
-                               ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                    LAMBDA: LOG SCANNER                              │
-│  ┌────────────────────────────────────────────────────────────┐   │
-│  │  12 Detection Patterns:                                     │   │
-│  │  • AWS Keys (AKIA...)     • Stripe keys (sk_live_)         │   │
-│  │  • Passwords (pwd=...)    • GitHub tokens (ghp_)           │   │
-│  │  • JWTs (eyJ...)          • Slack tokens (xox...)          │   │
-│  │  • DB connection strings  • Private keys (-----BEGIN)      │   │
-│  │  • Bearer tokens          • Generic secrets                │   │
-│  │  + Shannon entropy analysis for low-false-positive results │   │
-│  └────────────────────────────────────────────────────────────┘   │
-│              │                    │                  │              │
-│              ▼                    ▼                  ▼              │
-│   ┌──────────────────┐  ┌───────────────┐  ┌──────────────────┐  │
-│   │   DynamoDB        │  │  SNS Topic    │  │  CloudWatch      │  │
-│   │   (findings+TTL)  │  │  (rate-limit) │  │  (custom metrics)│  │
-│   └──────────────────┘  └───────┬───────┘  └──────────────────┘  │
-│                                  │                                 │
-│   ┌──────────────────┐          │                                 │
-│   │   SQS DLQ         │          │                                │
-│   │   (failed events) │          │                                │
-│   └──────────────────┘          │                                 │
-└──────────────────────────────────┼─────────────────────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    ▼              ▼              ▼
-             ┌────────────┐ ┌────────────┐ ┌────────────┐
-             │   Slack    │ │   Email    │ │ PagerDuty  │
-             └────────────┘ └────────────┘ └────────────┘
+Services → CloudWatch → [Auto-Subscribe] → Kinesis → Lambda Scanner → DynamoDB + SNS Alert
 ```
 
 ---

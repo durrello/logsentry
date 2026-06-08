@@ -12,12 +12,28 @@ import time
 import boto3
 from datetime import datetime
 
-# Initialize AWS clients
-dynamodb = boto3.resource("dynamodb")
-sns = boto3.client("sns")
+# Configuration
 TABLE_NAME = os.environ.get("FINDINGS_TABLE", "logsentry-findings")
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+
+# Lazy-initialized AWS clients (avoids errors when importing in test/CI without AWS config)
+_dynamodb = None
+_sns = None
+
+
+def _get_dynamodb():
+    global _dynamodb
+    if _dynamodb is None:
+        _dynamodb = boto3.resource("dynamodb")
+    return _dynamodb
+
+
+def _get_sns():
+    global _sns
+    if _sns is None:
+        _sns = boto3.client("sns")
+    return _sns
 
 # Sensitive data patterns
 PATTERNS = {
@@ -146,14 +162,14 @@ def scan_log_event(log_event: dict, log_group: str, log_stream: str) -> list:
 
 def store_finding(finding: dict) -> bool:
     """Store finding in DynamoDB (deduplicated by finding_id)."""
-    table = dynamodb.Table(TABLE_NAME)
+    table = _get_dynamodb().Table(TABLE_NAME)
     try:
         table.put_item(
             Item=finding,
             ConditionExpression="attribute_not_exists(finding_id)",
         )
         return True  # New finding
-    except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
+    except _get_dynamodb().meta.client.exceptions.ConditionalCheckFailedException:
         return False  # Already exists (duplicate)
 
 
@@ -176,7 +192,7 @@ def send_alert(finding: dict):
         f"Context: {finding['context'][:100]}..."
     )
 
-    sns.publish(
+    _get_sns().publish(
         TopicArn=SNS_TOPIC_ARN,
         Subject=f"[LogSentry] {finding['severity'].upper()}: {finding['description']}",
         Message=message,

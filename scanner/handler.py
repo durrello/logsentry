@@ -9,22 +9,26 @@ import base64
 import gzip
 import hashlib
 import time
-import boto3
-from datetime import datetime
+import math
+from datetime import datetime, timezone, timedelta
 
 # Configuration
 TABLE_NAME = os.environ.get("FINDINGS_TABLE", "logsentry-findings")
 SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "")
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
+FINDINGS_TTL_DAYS = int(os.environ.get("FINDINGS_TTL_DAYS", "90"))
+ALERT_RATE_LIMIT = int(os.environ.get("ALERT_RATE_LIMIT", "10"))
 
-# Lazy-initialized AWS clients (avoids errors when importing in test/CI without AWS config)
+# Lazy-initialized AWS clients
 _dynamodb = None
 _sns = None
+_cloudwatch = None
 
 
 def _get_dynamodb():
     global _dynamodb
     if _dynamodb is None:
+        import boto3
         _dynamodb = boto3.resource("dynamodb")
     return _dynamodb
 
@@ -32,8 +36,18 @@ def _get_dynamodb():
 def _get_sns():
     global _sns
     if _sns is None:
+        import boto3
         _sns = boto3.client("sns")
     return _sns
+
+
+def _get_cloudwatch():
+    global _cloudwatch
+    if _cloudwatch is None:
+        import boto3
+        _cloudwatch = boto3.client("cloudwatch")
+    return _cloudwatch
+
 
 # Sensitive data patterns
 PATTERNS = {
@@ -108,7 +122,7 @@ def calculate_entropy(data: str) -> float:
     entropy = 0.0
     for x in set(data):
         p_x = data.count(x) / len(data)
-        entropy -= p_x * (p_x and __import__("math").log2(p_x))
+        entropy -= p_x * math.log2(p_x)
     return entropy
 
 
@@ -141,6 +155,7 @@ def scan_log_event(log_event: dict, log_group: str, log_stream: str) -> list:
                 if calculate_entropy(matched_value) < 3.5:
                     continue
 
+            now = datetime.now(timezone.utc)
             finding = {
                 "finding_id": generate_finding_id(log_group, pattern_name, matched_value),
                 "pattern_name": pattern_name,
@@ -148,13 +163,18 @@ def scan_log_event(log_event: dict, log_group: str, log_stream: str) -> list:
                 "description": pattern_config["description"],
                 "log_group": log_group,
                 "log_stream": log_stream,
-                "timestamp": datetime.utcfromtimestamp(timestamp / 1000).isoformat() + "Z",
+                "timestamp": datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc).isoformat(),
                 "matched_value_masked": mask_secret(matched_value),
-                "context": message[:200],  # First 200 chars for context
+                "context": message[:200],
                 "environment": ENVIRONMENT,
                 "status": "open",
-                "detected_at": datetime.utcnow().isoformat() + "Z",
+                "detected_at": now.isoformat(),
             }
+
+            # TTL: set expiry for resolved findings (open findings don't expire)
+            if FINDINGS_TTL_DAYS > 0:
+                finding["expires_at"] = int((now + timedelta(days=FINDINGS_TTL_DAYS)).timestamp())
+
             findings.append(finding)
 
     return findings
@@ -199,6 +219,44 @@ def send_alert(finding: dict):
     )
 
 
+def emit_metrics(total_findings: int, new_findings: int, findings_by_severity: dict):
+    """Emit custom CloudWatch metrics for monitoring."""
+    try:
+        metric_data = [
+            {
+                "MetricName": "FindingsDetected",
+                "Value": total_findings,
+                "Unit": "Count",
+                "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
+            },
+            {
+                "MetricName": "NewFindings",
+                "Value": new_findings,
+                "Unit": "Count",
+                "Dimensions": [{"Name": "Environment", "Value": ENVIRONMENT}],
+            },
+        ]
+
+        # Per-severity metrics
+        for severity, count in findings_by_severity.items():
+            metric_data.append({
+                "MetricName": "FindingsDetected",
+                "Value": count,
+                "Unit": "Count",
+                "Dimensions": [
+                    {"Name": "Environment", "Value": ENVIRONMENT},
+                    {"Name": "Severity", "Value": severity},
+                ],
+            })
+
+        _get_cloudwatch().put_metric_data(
+            Namespace="LogSentry",
+            MetricData=metric_data,
+        )
+    except Exception as e:
+        print(f"Failed to emit metrics: {e}")
+
+
 def handler(event, context):
     """
     Lambda handler — processes Kinesis records containing CloudWatch log events.
@@ -206,6 +264,8 @@ def handler(event, context):
     """
     total_findings = 0
     new_findings = 0
+    alerts_sent = 0
+    findings_by_severity = {}
 
     for record in event.get("Records", []):
         # Decode Kinesis record
@@ -221,10 +281,21 @@ def handler(event, context):
             total_findings += len(findings)
 
             for finding in findings:
+                # Track by severity
+                sev = finding["severity"]
+                findings_by_severity[sev] = findings_by_severity.get(sev, 0) + 1
+
                 is_new = store_finding(finding)
                 if is_new:
                     new_findings += 1
-                    send_alert(finding)
+                    # Rate-limit alerts to prevent storms
+                    if alerts_sent < ALERT_RATE_LIMIT:
+                        send_alert(finding)
+                        alerts_sent += 1
+
+    # Emit custom CloudWatch metrics
+    if total_findings > 0:
+        emit_metrics(total_findings, new_findings, findings_by_severity)
 
     return {
         "statusCode": 200,
@@ -232,5 +303,6 @@ def handler(event, context):
             "records_processed": len(event.get("Records", [])),
             "total_findings": total_findings,
             "new_findings": new_findings,
+            "alerts_sent": alerts_sent,
         }),
     }

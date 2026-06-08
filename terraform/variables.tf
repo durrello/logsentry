@@ -15,13 +15,25 @@ variable "environment" {
 }
 
 variable "alert_email" {
-  description = "Email for SNS alerts"
+  description = "Email for SNS alerts (leave empty to disable)"
   type        = string
   default     = ""
 }
 
 variable "log_group_exclude_prefixes" {
-  description = "Comma-separated prefixes of log groups to exclude from scanning (e.g. /aws/lambda/logsentry,/aws/rds)"
+  description = "Comma-separated prefixes of log groups to exclude from scanning"
   type        = string
   default     = "/aws/lambda/logsentry,/aws/cloudtrail,/aws/rds"
+}
+
+variable "findings_ttl_days" {
+  description = "Days to keep resolved findings before auto-expiring (0 = never expire)"
+  type        = number
+  default     = 90
+}
+
+variable "alert_rate_limit" {
+  description = "Max SNS alerts per invocation (prevents alert storms)"
+  type        = number
+  default     = 10
 }

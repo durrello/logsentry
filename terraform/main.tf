@@ -65,6 +65,11 @@ resource "aws_dynamodb_table" "findings" {
     projection_type = "ALL"
   }
 
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
   point_in_time_recovery {
     enabled = true
   }
@@ -86,26 +91,37 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
-# ─── Lambda Function ─────────────────────────────────────────────────────────
+# ─── Lambda Function (Zip Deploy — no Docker/ECR needed) ─────────────────────
 resource "aws_lambda_function" "scanner" {
   function_name = "logsentry-scanner-${var.environment}"
   role          = aws_iam_role.lambda_role.arn
-  package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.scanner.repository_url}:latest"
+  runtime       = "python3.11"
+  handler       = "handler.handler"
   timeout       = 60
   memory_size   = 256
 
+  filename         = data.archive_file.scanner.output_path
+  source_code_hash = data.archive_file.scanner.output_base64sha256
+
   environment {
     variables = {
-      FINDINGS_TABLE = aws_dynamodb_table.findings.name
-      SNS_TOPIC_ARN  = aws_sns_topic.alerts.arn
-      ENVIRONMENT    = var.environment
+      FINDINGS_TABLE     = aws_dynamodb_table.findings.name
+      SNS_TOPIC_ARN      = aws_sns_topic.alerts.arn
+      ENVIRONMENT        = var.environment
+      FINDINGS_TTL_DAYS  = var.findings_ttl_days
+      ALERT_RATE_LIMIT   = var.alert_rate_limit
     }
   }
 
   dead_letter_config {
     target_arn = aws_sqs_queue.dlq.arn
   }
+}
+
+data "archive_file" "scanner" {
+  type        = "zip"
+  source_file = "${path.module}/../scanner/handler.py"
+  output_path = "${path.module}/scanner.zip"
 }
 
 # ─── Lambda Event Source (Kinesis) ───────────────────────────────────────────
@@ -123,17 +139,6 @@ resource "aws_lambda_event_source_mapping" "kinesis_trigger" {
 resource "aws_sqs_queue" "dlq" {
   name                      = "logsentry-dlq-${var.environment}"
   message_retention_seconds = 1209600 # 14 days
-}
-
-# ─── ECR Repository ─────────────────────────────────────────────────────────
-resource "aws_ecr_repository" "scanner" {
-  name                 = "logsentry-scanner-${var.environment}"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = var.environment == "dev"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
 }
 
 # ─── IAM Role for Lambda ────────────────────────────────────────────────────
@@ -175,6 +180,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "dynamodb:GetItem",
           "dynamodb:Query",
           "dynamodb:UpdateItem",
+          "dynamodb:Scan",
         ]
         Resource = [
           aws_dynamodb_table.findings.arn,
@@ -187,10 +193,8 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Resource = aws_sns_topic.alerts.arn
       },
       {
-        Effect = "Allow"
-        Action = [
-          "sqs:SendMessage",
-        ]
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
         Resource = aws_sqs_queue.dlq.arn
       },
       {
@@ -202,11 +206,16 @@ resource "aws_iam_role_policy" "lambda_policy" {
         ]
         Resource = "arn:aws:logs:*:*:*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+      },
     ]
   })
 }
 
-# ─── CloudWatch Subscription Filter (example) ───────────────────────────────
+# ─── CloudWatch to Kinesis Role ──────────────────────────────────────────────
 resource "aws_iam_role" "cloudwatch_to_kinesis" {
   name = "logsentry-cw-to-kinesis-${var.environment}"
 
@@ -234,11 +243,7 @@ resource "aws_iam_role_policy" "cloudwatch_to_kinesis" {
   })
 }
 
-# ─── Auto-Subscribe: Subscribe ALL log groups automatically ──────────────────
-# This Lambda is triggered by EventBridge whenever a new CloudWatch Log Group
-# is created. It automatically adds a subscription filter so every log group
-# is scanned by LogSentry without manual intervention.
-
+# ─── Auto-Subscribe Lambda ───────────────────────────────────────────────────
 resource "aws_lambda_function" "auto_subscribe" {
   function_name = "logsentry-auto-subscribe-${var.environment}"
   role          = aws_iam_role.auto_subscribe_role.arn
@@ -275,18 +280,15 @@ CW_ROLE_ARN = os.environ['CW_ROLE_ARN']
 EXCLUDE_PREFIXES = [p.strip() for p in os.environ.get('EXCLUDE_PREFIXES', '').split(',') if p.strip()]
 
 def should_exclude(log_group_name):
-    """Check if log group should be excluded from scanning."""
     for prefix in EXCLUDE_PREFIXES:
         if log_group_name.startswith(prefix):
             return True
     return False
 
 def subscribe_log_group(log_group_name):
-    """Add subscription filter to a log group."""
     if should_exclude(log_group_name):
         return 'excluded'
     try:
-        # Check if already subscribed
         existing = logs.describe_subscription_filters(logGroupName=log_group_name)
         filters = existing.get('subscriptionFilters', [])
         if any(f['filterName'].startswith('logsentry') for f in filters):
@@ -307,7 +309,6 @@ def subscribe_log_group(log_group_name):
         return 'error'
 
 def scan_all_log_groups():
-    """Scan all existing log groups and subscribe any that are missing."""
     paginator = logs.get_paginator('describe_log_groups')
     results = {'subscribed': 0, 'skipped': 0}
     for page in paginator.paginate():
@@ -321,19 +322,15 @@ def scan_all_log_groups():
     return results
 
 def handler(event, context):
-    """Handle both EventBridge (new log group) and scheduled (scan all) triggers."""
-    # Scheduled invocation: scan all log groups
     if event.get('action') == 'scan_all' or event.get('source') == 'scheduled':
         results = scan_all_log_groups()
         return {'statusCode': 200, 'body': json.dumps(results)}
 
-    # EventBridge: new log group created
     detail = event.get('detail', {})
     request_params = detail.get('requestParameters', {})
     log_group_name = request_params.get('logGroupName', '')
 
     if not log_group_name:
-        print(f"No logGroupName in event: {json.dumps(event)}")
         return {'statusCode': 400, 'body': 'No log group name found'}
 
     result = subscribe_log_group(log_group_name)
@@ -343,7 +340,6 @@ PYTHON
   }
 }
 
-# IAM role for auto-subscribe Lambda
 resource "aws_iam_role" "auto_subscribe_role" {
   name = "logsentry-auto-subscribe-role-${var.environment}"
 
@@ -365,40 +361,28 @@ resource "aws_iam_role_policy" "auto_subscribe_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "logs:PutSubscriptionFilter",
-          "logs:DescribeLogGroups",
-          "logs:DescribeSubscriptionFilters",
-        ]
+        Effect   = "Allow"
+        Action   = ["logs:PutSubscriptionFilter", "logs:DescribeLogGroups", "logs:DescribeSubscriptionFilters"]
         Resource = "arn:aws:logs:*:*:*"
       },
       {
-        Effect = "Allow"
-        Action = [
-          "iam:PassRole",
-        ]
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
         Resource = aws_iam_role.cloudwatch_to_kinesis.arn
       },
       {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-        ]
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:*:*:*"
       },
     ]
   })
 }
 
-# EventBridge rule: fires on any new CloudWatch Log Group creation
-# NOTE: Requires CloudTrail to be enabled. If not available, the scheduled
-# rule below handles it by polling every 5 minutes.
+# EventBridge: new log group (requires CloudTrail)
 resource "aws_cloudwatch_event_rule" "new_log_group" {
   name        = "logsentry-new-log-group-${var.environment}"
-  description = "Triggers auto-subscribe when a new CloudWatch Log Group is created"
+  description = "Triggers auto-subscribe on new CloudWatch Log Group"
 
   event_pattern = jsonencode({
     source      = ["aws.logs"]
@@ -423,34 +407,7 @@ resource "aws_lambda_permission" "eventbridge_invoke" {
   source_arn    = aws_cloudwatch_event_rule.new_log_group.arn
 }
 
-# ─── Subscribe existing log groups (one-time via local-exec) ─────────────────
-# On first deploy, subscribe all existing log groups that match the include pattern.
-resource "null_resource" "subscribe_existing_log_groups" {
-  depends_on = [
-    aws_iam_role_policy.cloudwatch_to_kinesis,
-    aws_kinesis_stream.log_stream,
-  ]
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      python3 ${path.module}/scripts/subscribe_existing.py \
-        --stream-arn ${aws_kinesis_stream.log_stream.arn} \
-        --role-arn ${aws_iam_role.cloudwatch_to_kinesis.arn} \
-        --exclude "${var.log_group_exclude_prefixes}" \
-        --region ${var.aws_region}
-    EOT
-  }
-
-  triggers = {
-    # Re-run if stream ARN changes
-    stream_arn = aws_kinesis_stream.log_stream.arn
-  }
-}
-
-# ─── Scheduled scan: catch unsubscribed log groups every 5 minutes ───────────
-# This ensures log groups are subscribed even without CloudTrail.
-# The auto-subscribe Lambda handles both event-driven AND scheduled invocations.
-
+# Scheduled scan: fallback for environments without CloudTrail
 resource "aws_cloudwatch_event_rule" "scheduled_scan" {
   name                = "logsentry-scheduled-scan-${var.environment}"
   description         = "Periodically scan for unsubscribed log groups"
@@ -471,39 +428,69 @@ resource "aws_lambda_permission" "scheduled_invoke" {
   source_arn    = aws_cloudwatch_event_rule.scheduled_scan.arn
 }
 
-# ─── Demo Log Group (for testing) ───────────────────────────────────────────
-resource "aws_cloudwatch_log_group" "demo_service" {
-  name              = "/app/demo-service"
-  retention_in_days = 7
+# Subscribe existing log groups on first deploy
+resource "null_resource" "subscribe_existing_log_groups" {
+  depends_on = [aws_iam_role_policy.cloudwatch_to_kinesis, aws_kinesis_stream.log_stream]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      python3 ${path.module}/scripts/subscribe_existing.py \
+        --stream-arn ${aws_kinesis_stream.log_stream.arn} \
+        --role-arn ${aws_iam_role.cloudwatch_to_kinesis.arn} \
+        --exclude "${var.log_group_exclude_prefixes}" \
+        --region ${var.aws_region}
+    EOT
+  }
+
+  triggers = {
+    stream_arn = aws_kinesis_stream.log_stream.arn
+  }
 }
 
-resource "aws_cloudwatch_log_subscription_filter" "demo_to_kinesis" {
-  name            = "logsentry-scanner"
-  log_group_name  = aws_cloudwatch_log_group.demo_service.name
-  filter_pattern  = ""
-  destination_arn = aws_kinesis_stream.log_stream.arn
-  role_arn        = aws_iam_role.cloudwatch_to_kinesis.arn
+# ─── CloudWatch Alarms ───────────────────────────────────────────────────────
+resource "aws_cloudwatch_metric_alarm" "scanner_errors" {
+  alarm_name          = "logsentry-scanner-errors-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 5
+  alarm_description   = "LogSentry scanner Lambda error rate too high"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    FunctionName = aws_lambda_function.scanner.function_name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "findings_critical" {
+  alarm_name          = "logsentry-critical-findings-${var.environment}"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "FindingsDetected"
+  namespace           = "LogSentry"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Critical findings detected by LogSentry"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    Severity = "critical"
+  }
 }
 
 # ─── Bootstrap: Terraform State Backend ──────────────────────────────────────
-# These resources are the S3 bucket and DynamoDB table that Terraform itself
-# uses for remote state. They must exist before `terraform init`, so they are
-# created once manually (or via a separate bootstrap script) and then imported.
-# Included here for documentation and drift detection.
-
 resource "aws_s3_bucket" "terraform_state" {
   bucket = "logsentry-terraform-state"
-
-  lifecycle {
-    prevent_destroy = true
-  }
+  lifecycle { prevent_destroy = true }
 }
 
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
-  versioning_configuration {
-    status = "Enabled"
-  }
+  versioning_configuration { status = "Enabled" }
 }
 
 resource "aws_dynamodb_table" "terraform_lock" {
@@ -516,7 +503,5 @@ resource "aws_dynamodb_table" "terraform_lock" {
     type = "S"
   }
 
-  lifecycle {
-    prevent_destroy = true
-  }
+  lifecycle { prevent_destroy = true }
 }

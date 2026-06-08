@@ -1,23 +1,29 @@
 output "kinesis_stream_arn" {
-  value = aws_kinesis_stream.log_stream.arn
+  description = "ARN of the Kinesis stream (for manual log group subscriptions)"
+  value       = aws_kinesis_stream.log_stream.arn
 }
 
 output "dynamodb_table_name" {
-  value = aws_dynamodb_table.findings.name
+  description = "DynamoDB table storing findings"
+  value       = aws_dynamodb_table.findings.name
 }
 
 output "sns_topic_arn" {
-  value = aws_sns_topic.alerts.arn
+  description = "SNS topic for alerts"
+  value       = aws_sns_topic.alerts.arn
 }
 
 output "lambda_function_name" {
-  value = aws_lambda_function.scanner.function_name
-}
-
-output "ecr_repository_url" {
-  value = aws_ecr_repository.scanner.repository_url
+  description = "Scanner Lambda function name"
+  value       = aws_lambda_function.scanner.function_name
 }
 
 output "dlq_url" {
-  value = aws_sqs_queue.dlq.url
+  description = "Dead letter queue URL"
+  value       = aws_sqs_queue.dlq.url
+}
+
+output "cw_to_kinesis_role_arn" {
+  description = "IAM role ARN for CloudWatch to Kinesis (use when manually subscribing log groups)"
+  value       = aws_iam_role.cloudwatch_to_kinesis.arn
 }

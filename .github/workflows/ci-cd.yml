@@ -13,7 +13,6 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: logsentry-scanner-dev
 
 jobs:
   test:
@@ -28,9 +27,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
+        run: pip install pytest pytest-cov
       - name: Run unit tests
         run: pytest tests/ -v --tb=short
 
@@ -49,31 +46,23 @@ jobs:
           severity: "CRITICAL,HIGH"
           exit-code: "0"
 
-  build-and-push:
-    name: Build & Push to ECR
+  deploy:
+    name: Deploy Lambda
     runs-on: ubuntu-latest
     needs: [test, security-scan]
     if: github.event_name == 'push' && vars.AWS_ENABLED == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-      - name: Build and push
+      - name: Package and deploy Lambda
         run: |
-          ECR_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
-          docker build -t $ECR_URI:${{ github.sha }} -t $ECR_URI:latest ./scanner
-          docker push $ECR_URI:${{ github.sha }}
-          docker push $ECR_URI:latest
-      - name: Update Lambda function
-        if: github.ref == 'refs/heads/dev'
-        run: |
-          ECR_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}
+          cd scanner
+          zip -j /tmp/scanner.zip handler.py
+          FUNC_NAME="logsentry-scanner-${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}"
           aws lambda update-function-code \
-            --function-name logsentry-scanner-dev \
-            --image-uri $ECR_URI:${{ github.sha }}
+            --function-name $FUNC_NAME \
+            --zip-file fileb:///tmp/scanner.zip

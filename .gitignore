@@ -9,5 +9,6 @@ terraform/*.tfstate*
 terraform/tfplan*
 terraform/.terraform.lock.hcl
 terraform/auto_subscribe.zip
+terraform/scanner.zip
 .DS_Store
 node_modules/

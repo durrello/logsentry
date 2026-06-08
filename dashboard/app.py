@@ -251,6 +251,37 @@ def api_scan():
     return jsonify({"findings": findings, "scanned": log_line[:100]})
 
 
+@app.route("/api/resolve", methods=["POST"])
+def api_resolve():
+    """Mark a finding as resolved."""
+    data = request.get_json()
+    finding_id = data.get("finding_id", "")
+    if not finding_id:
+        return jsonify({"error": "finding_id required"}), 400
+
+    if MODE == "live":
+        import boto3
+        dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
+        table = dynamodb.Table(TABLE_NAME)
+        table.update_item(
+            Key={"finding_id": finding_id},
+            UpdateExpression="SET #s = :status, resolved_at = :now",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":status": "resolved",
+                ":now": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    else:
+        # Demo mode: update in-memory
+        for f in SAMPLE_FINDINGS:
+            if f["finding_id"] == finding_id:
+                f["status"] = "resolved"
+                break
+
+    return jsonify({"status": "resolved", "finding_id": finding_id})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n{'='*60}")

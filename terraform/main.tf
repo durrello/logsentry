@@ -105,11 +105,11 @@ resource "aws_lambda_function" "scanner" {
 
   environment {
     variables = {
-      FINDINGS_TABLE     = aws_dynamodb_table.findings.name
-      SNS_TOPIC_ARN      = aws_sns_topic.alerts.arn
-      ENVIRONMENT        = var.environment
-      FINDINGS_TTL_DAYS  = var.findings_ttl_days
-      ALERT_RATE_LIMIT   = var.alert_rate_limit
+      FINDINGS_TABLE    = aws_dynamodb_table.findings.name
+      SNS_TOPIC_ARN     = aws_sns_topic.alerts.arn
+      ENVIRONMENT       = var.environment
+      FINDINGS_TTL_DAYS = var.findings_ttl_days
+      ALERT_RATE_LIMIT  = var.alert_rate_limit
     }
   }
 
@@ -269,7 +269,7 @@ data "archive_file" "auto_subscribe" {
   output_path = "${path.module}/auto_subscribe.zip"
 
   source {
-    content = <<-PYTHON
+    content  = <<-PYTHON
 import os
 import json
 import boto3

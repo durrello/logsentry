@@ -1,7 +1,13 @@
-.PHONY: help test build scan deploy
+.PHONY: help test build scan deploy dashboard dashboard-live
 
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+dashboard: ## Run dashboard (demo mode)
+	cd dashboard && PORT=8080 python3 app.py
+
+dashboard-live: ## Run dashboard (live DynamoDB mode)
+	cd dashboard && LOGSENTRY_MODE=live PORT=8080 python3 app.py
 
 test: ## Run scanner unit tests
 	cd scanner && pip install -r requirements.txt pytest && pytest tests/ -v

@@ -233,3 +233,53 @@ resource "aws_iam_role_policy" "cloudwatch_to_kinesis" {
     }]
   })
 }
+
+# ─── Demo Log Group + Subscription Filter ────────────────────────────────────
+resource "aws_cloudwatch_log_group" "demo_service" {
+  name              = "/app/demo-service"
+  retention_in_days = 7
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "demo_to_kinesis" {
+  name            = "logsentry-scanner"
+  log_group_name  = aws_cloudwatch_log_group.demo_service.name
+  filter_pattern  = ""
+  destination_arn = aws_kinesis_stream.log_stream.arn
+  role_arn        = aws_iam_role.cloudwatch_to_kinesis.arn
+}
+
+# ─── Bootstrap: Terraform State Backend ──────────────────────────────────────
+# These resources are the S3 bucket and DynamoDB table that Terraform itself
+# uses for remote state. They must exist before `terraform init`, so they are
+# created once manually (or via a separate bootstrap script) and then imported.
+# Included here for documentation and drift detection.
+
+resource "aws_s3_bucket" "terraform_state" {
+  bucket = "logsentry-terraform-state"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "terraform_state" {
+  bucket = aws_s3_bucket.terraform_state.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_dynamodb_table" "terraform_lock" {
+  name         = "terraform-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogSentry — Security Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #1a1d27;
+            --bg-card: #21242f;
+            --bg-hover: #2a2d3a;
+            --text-primary: #e4e7ec;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --border: #2d3140;
+            --critical: #ef4444;
+            --critical-bg: rgba(239, 68, 68, 0.1);
+            --high: #f59e0b;
+            --high-bg: rgba(245, 158, 11, 0.1);
+            --medium: #3b82f6;
+            --medium-bg: rgba(59, 130, 246, 0.1);
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.1);
+            --accent: #6366f1;
+            --accent-bg: rgba(99, 102, 241, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .mode-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-weight: 500;
+        }
+
+        .mode-demo { background: var(--accent-bg); color: #818cf8; }
+        .mode-live { background: var(--success-bg); color: #34d399; }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .last-updated {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .refresh-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover { background: var(--bg-hover); }
+
+        /* Main Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .stat-critical .stat-value { color: var(--critical); }
+        .stat-high .stat-value { color: var(--high); }
+        .stat-medium .stat-value { color: var(--medium); }
+        .stat-open .stat-value { color: var(--critical); }
+        .stat-resolved .stat-value { color: var(--success); }
+        .stat-total .stat-value { color: var(--text-primary); }
+
+        /* Content Grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .content-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Findings Table */
+        .panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .filters {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            font-size: 0.75rem;
+            padding: 0.3rem 0.7rem;
+            border-radius: 0.375rem;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+        .filter-btn.active { background: var(--accent-bg); border-color: var(--accent); color: #818cf8; }
+
+        .findings-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .finding-item {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.15s;
+            cursor: pointer;
+        }
+
+        .finding-item:hover { background: var(--bg-hover); }
+        .finding-item:last-child { border-bottom: none; }
+
+        .finding-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.4rem;
+        }
+
+        .severity-badge {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.25rem;
+            text-transform: uppercase;
+        }
+
+        .severity-critical { background: var(--critical-bg); color: var(--critical); }
+        .severity-high { background: var(--high-bg); color: var(--high); }
+        .severity-medium { background: var(--medium-bg); color: var(--medium); }
+
+        .finding-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .finding-description {
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 0.3rem;
+        }
+
+        .finding-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .finding-masked {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            background: var(--bg-primary);
+            padding: 0.2rem 0.5rem;
+            border-radius: 0.25rem;
+            margin-top: 0.4rem;
+            display: inline-block;
+        }
+
+        .status-badge {
+            font-size: 0.65rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 0.25rem;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .status-open { background: var(--critical-bg); color: var(--critical); }
+        .status-resolved { background: var(--success-bg); color: var(--success); }
+
+        /* Right Panel - Scanner + Charts */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Live Scanner */
+        .scanner-input {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            color: var(--text-primary);
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .scanner-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .scan-btn {
+            width: 100%;
+            margin-top: 0.75rem;
+            padding: 0.7rem;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            border: none;
+            border-radius: 0.5rem;
+            color: white;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .scan-btn:hover { opacity: 0.9; }
+
+        .scan-result {
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            display: none;
+        }
+
+        .scan-result.found {
+            display: block;
+            background: var(--critical-bg);
+            border: 1px solid var(--critical);
+        }
+
+        .scan-result.clean {
+            display: block;
+            background: var(--success-bg);
+            border: 1px solid var(--success);
+        }
+
+        /* Pattern Breakdown */
+        .pattern-list { padding: 1rem 1.25rem; }
+
+        .pattern-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .pattern-item:last-child { border-bottom: none; }
+
+        .pattern-name {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .pattern-bar-container {
+            flex: 1;
+            margin: 0 1rem;
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .pattern-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        .pattern-count {
+            font-size: 0.8rem;
+            font-weight: 600;
+            min-width: 1.5rem;
+            text-align: right;
+        }
+
+        /* Empty state */
+        .empty-state {
+            padding: 3rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <span class="logo">🛡️ LogSentry</span>
+            <span class="mode-badge {{ 'mode-live' if mode == 'live' else 'mode-demo' }}">
+                {{ '📡 LIVE' if mode == 'live' else '🎮 DEMO' }}
+            </span>
+        </div>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated">Updated just now</span>
+            <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card stat-total">
+                <div class="stat-label">Total Findings</div>
+                <div class="stat-value" id="statTotal">—</div>
+            </div>
+            <div class="stat-card stat-critical">
+                <div class="stat-label">Critical</div>
+                <div class="stat-value" id="statCritical">—</div>
+            </div>
+            <div class="stat-card stat-high">
+                <div class="stat-label">High</div>
+                <div class="stat-value" id="statHigh">—</div>
+            </div>
+            <div class="stat-card stat-medium">
+                <div class="stat-label">Medium</div>
+                <div class="stat-value" id="statMedium">—</div>
+            </div>
+            <div class="stat-card stat-open">
+                <div class="stat-label">Open</div>
+                <div class="stat-value" id="statOpen">—</div>
+            </div>
+            <div class="stat-card stat-resolved">
+                <div class="stat-label">Resolved</div>
+                <div class="stat-value" id="statResolved">—</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content-grid">
+            <!-- Findings List -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Recent Findings</span>
+                    <div class="filters">
+                        <button class="filter-btn active" data-filter="all" onclick="filterFindings('all', this)">All</button>
+                        <button class="filter-btn" data-filter="critical" onclick="filterFindings('critical', this)">Critical</button>
+                        <button class="filter-btn" data-filter="high" onclick="filterFindings('high', this)">High</button>
+                        <button class="filter-btn" data-filter="medium" onclick="filterFindings('medium', this)">Medium</button>
+                    </div>
+                </div>
+                <div class="findings-list" id="findingsList">
+                    <div class="empty-state">Loading findings...</div>
+                </div>
+            </div>
+
+            <!-- Right Panel -->
+            <div class="right-panel">
+                <!-- Live Scanner -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">🔍 Live Scanner</span>
+                    </div>
+                    <div style="padding: 1rem 1.25rem;">
+                        <textarea class="scanner-input" id="scanInput" placeholder="Paste a log line to scan for secrets...&#10;&#10;Try: password=MySecret123! or AKIAIOSFODNN7EXAMPLE"></textarea>
+                        <button class="scan-btn" onclick="scanLog()">Scan for Secrets</button>
+                        <div class="scan-result" id="scanResult"></div>
+                    </div>
+                </div>
+
+                <!-- Pattern Breakdown -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Pattern Breakdown</span>
+                    </div>
+                    <div class="pattern-list" id="patternList">
+                        <div class="empty-state">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Top Services -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <span class="panel-title">Affected Services</span>
+                    </div>
+                    <div class="pattern-list" id="serviceList">
+                        <div class="empty-state">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFilter = 'all';
+        let allFindings = [];
+
+        async function loadData() {
+            try {
+                const [findingsRes, statsRes] = await Promise.all([
+                    fetch('/api/findings'),
+                    fetch('/api/stats')
+                ]);
+                allFindings = await findingsRes.json();
+                const stats = await statsRes.json();
+
+                // Update stats
+                document.getElementById('statTotal').textContent = stats.total;
+                document.getElementById('statCritical').textContent = stats.critical;
+                document.getElementById('statHigh').textContent = stats.high;
+                document.getElementById('statMedium').textContent = stats.medium;
+                document.getElementById('statOpen').textContent = stats.open;
+                document.getElementById('statResolved').textContent = stats.resolved;
+
+                // Render findings
+                renderFindings(allFindings);
+
+                // Render pattern breakdown
+                renderPatterns(stats.by_pattern, stats.total);
+
+                // Render services
+                renderServices(stats.by_service, stats.total);
+
+                // Update timestamp
+                document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
+        }
+
+        function renderFindings(findings) {
+            const container = document.getElementById('findingsList');
+            if (!findings.length) {
+                container.innerHTML = '<div class="empty-state">No findings match the current filter.</div>';
+                return;
+            }
+
+            container.innerHTML = findings.map(f => `
+                <div class="finding-item">
+                    <div class="finding-top">
+                        <span class="severity-badge severity-${f.severity}">${f.severity}</span>
+                        <div style="display:flex;gap:0.5rem;align-items:center;">
+                            <span class="status-badge status-${f.status}">${f.status}</span>
+                            <span class="finding-time">${timeAgo(f.detected_at)}</span>
+                        </div>
+                    </div>
+                    <div class="finding-description">${f.description}</div>
+                    <div class="finding-meta">
+                        <span>📁 ${f.log_group}</span>
+                        <span>🌍 ${f.environment}</span>
+                    </div>
+                    <span class="finding-masked">${f.matched_value_masked}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderPatterns(patterns, total) {
+            const container = document.getElementById('patternList');
+            const colors = {
+                aws_access_key: '#ef4444', password_in_log: '#ef4444',
+                database_url: '#ef4444', private_key: '#ef4444',
+                stripe_key: '#ef4444', github_token: '#ef4444',
+                jwt_token: '#f59e0b', bearer_token: '#f59e0b',
+                slack_token: '#f59e0b', generic_api_key: '#f59e0b',
+                generic_secret: '#3b82f6'
+            };
+
+            const sorted = Object.entries(patterns).sort((a, b) => b[1] - a[1]);
+            container.innerHTML = sorted.map(([name, count]) => `
+                <div class="pattern-item">
+                    <span class="pattern-name">${name.replace(/_/g, ' ')}</span>
+                    <div class="pattern-bar-container">
+                        <div class="pattern-bar" style="width: ${(count/total)*100}%; background: ${colors[name] || '#6366f1'}"></div>
+                    </div>
+                    <span class="pattern-count">${count}</span>
+                </div>
+            `).join('');
+        }
+
+        function renderServices(services, total) {
+            const container = document.getElementById('serviceList');
+            const sorted = Object.entries(services).sort((a, b) => b[1] - a[1]);
+            container.innerHTML = sorted.map(([name, count]) => `
+                <div class="pattern-item">
+                    <span class="pattern-name">${name}</span>
+                    <div class="pattern-bar-container">
+                        <div class="pattern-bar" style="width: ${(count/total)*100}%; background: #6366f1"></div>
+                    </div>
+                    <span class="pattern-count">${count}</span>
+                </div>
+            `).join('');
+        }
+
+        function filterFindings(severity, btn) {
+            currentFilter = severity;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            const filtered = severity === 'all'
+                ? allFindings
+                : allFindings.filter(f => f.severity === severity);
+            renderFindings(filtered);
+        }
+
+        async function scanLog() {
+            const input = document.getElementById('scanInput').value.trim();
+            const resultEl = document.getElementById('scanResult');
+            if (!input) return;
+
+            try {
+                const res = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_line: input })
+                });
+                const data = await res.json();
+
+                if (data.findings.length > 0) {
+                    resultEl.className = 'scan-result found';
+                    resultEl.innerHTML = `
+                        <strong>🚨 ${data.findings.length} secret(s) detected!</strong><br><br>
+                        ${data.findings.map(f => `
+                            <div style="margin-bottom:0.5rem;">
+                                <span class="severity-badge severity-${f.severity}">${f.severity}</span>
+                                ${f.description}<br>
+                                <code style="font-size:0.75rem;color:var(--text-muted)">${f.matched_value_masked}</code>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    resultEl.className = 'scan-result clean';
+                    resultEl.innerHTML = '<strong>✅ Clean</strong> — no sensitive data detected in this log line.';
+                }
+            } catch (err) {
+                resultEl.className = 'scan-result found';
+                resultEl.innerHTML = 'Error scanning: ' + err.message;
+            }
+        }
+
+        function timeAgo(dateStr) {
+            const now = new Date();
+            const date = new Date(dateStr);
+            const diff = Math.floor((now - date) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+            return Math.floor(diff/86400) + 'd ago';
+        }
+
+        // Scan on Enter key
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('scanInput').addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    scanLog();
+                }
+            });
+        });
+
+        // Initial load
+        loadData();
+
+        // Auto-refresh every 30s
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>

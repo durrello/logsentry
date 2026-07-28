@@ -4,7 +4,7 @@ help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 test: ## Run scanner unit tests
-	cd scanner && pip install pytest -q && pytest tests/ -v
+	cd scanner && python3 -m pytest tests/ -v
 
 deploy: ## Deploy scanner Lambda (zip)
 	cd scanner && zip -j /tmp/scanner.zip handler.py && \
